@@ -115,7 +115,7 @@ function entity_metrics_cron($limit = 500) {
     }
 
     // Perform the merge query.
-    $merge = \Drupal::database()->merge('entity_metrics_regions')
+    \Drupal::database()->merge('entity_metrics_regions')
       ->key($data)
       ->fields($data)
       ->execute();

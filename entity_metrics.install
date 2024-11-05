@@ -108,4 +108,5 @@ function entity_metrics_install() {
  */
 function entity_metrics_uninstall() {
   Database::getConnection()->schema()->dropTable('entity_metrics_data');
+  Database::getConnection()->schema()->dropTable('entity_metrics_regions');
 }

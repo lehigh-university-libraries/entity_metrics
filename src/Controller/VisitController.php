@@ -2,7 +2,9 @@
 
 namespace Drupal\entity_metrics\Controller;
 
+use Drupal\Component\Datetime\Time;
 use Drupal\Core\Controller\ControllerBase;
+use Drupal\Core\Database\Connection;
 use Drupal\Core\Session\SessionManager;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -19,18 +21,38 @@ class VisitController extends ControllerBase {
   /**
    * The session manager.
    *
-   * @var Drupal\Core\Session\SessionManager
+   * @var \Drupal\Core\Session\SessionManager
    */
   protected $session;
 
   /**
-   * CustomFloodController constructor.
+   * The database connection.
+   *
+   * @var \Drupal\Core\Database\Connection
+   */
+  protected $database;
+
+  /**
+   * The time service.
+   *
+   * @var \Drupal\Component\Datetime\Time
+   */
+  protected $time;
+
+  /**
+   * VisitController constructor.
    *
    * @param \Drupal\Core\Session\SessionManager $session
    *   The Drupal session manager service.
+   * @param \Drupal\Core\Database\Connection $database
+   *   The database connection service.
+   * @param \Drupal\Core\Datetime\TimeInterface $time
+   *   The time service.
    */
-  public function __construct(SessionManager $session) {
+  public function __construct(SessionManager $session, Connection $database, Time $time) {
     $this->session = $session;
+    $this->database = $database;
+    $this->time = $time;
   }
 
   /**
@@ -38,7 +60,9 @@ class VisitController extends ControllerBase {
    */
   public static function create(ContainerInterface $container) {
     return new static(
-      $container->get('session_manager')
+      $container->get('session_manager'),
+      $container->get('database'),
+      $container->get('datetime.time')
     );
   }
 
@@ -58,12 +82,12 @@ class VisitController extends ControllerBase {
 
     $currentPath = explode('/', $request->request->get('currentPath'));
     $entity_id = array_pop($currentPath);
-    \Drupal::database()->insert('entity_metrics_data')
+    $this->database->insert('entity_metrics_data')
       ->fields([
         'entity_type' => 'node',
         'entity_id' => $entity_id,
         'session_id' => $this->session->getId(),
-        'timestamp' => \Drupal::time()->getCurrentTime(),
+        'timestamp' => $this->time->getCurrentTime(),
         'ip_address' => $ip,
       ])
       ->execute();
@@ -77,15 +101,15 @@ class VisitController extends ControllerBase {
    */
   public function getVisits($type, $id) {
     return new JsonResponse([
-      'monthly' => \Drupal::database()->query('SELECT COUNT(id) FROM {entity_metrics_data}
+      'monthly' => $this->database->query('SELECT COUNT(id) FROM {entity_metrics_data}
         WHERE entity_type = :type
           AND entity_id = :id
           AND timestamp > :thirtyDays', [
             ':type' => $type,
             ':id' => $id,
-            ':thirtyDays' => \Drupal::time()->getCurrentTime() - 2592000,
+            ':thirtyDays' => $this->time->getCurrentTime() - 2592000,
           ])->fetchField(),
-      'total' => \Drupal::database()->query('SELECT COUNT(id) FROM {entity_metrics_data}
+      'total' => $this->database->query('SELECT COUNT(id) FROM {entity_metrics_data}
         WHERE entity_type = :type
           AND entity_id = :id', [
             ':type' => $type,
@@ -97,13 +121,13 @@ class VisitController extends ControllerBase {
   /**
    * Check the flood status.
    */
-  public static function checkFlood(string $ip) : bool {
+  public function checkFlood(string $ip) : bool {
     // Only allow recording 20 events every minute.
-    return \Drupal::database()->query('SELECT COUNT(id) FROM {entity_metrics_data}
+    return $this->database->query('SELECT COUNT(id) FROM {entity_metrics_data}
       WHERE ip_address = :ip
         AND timestamp > :timeout', [
           ':ip' => $ip,
-          ':timeout' => \Drupal::time()->getCurrentTime() - self::FLOOD_EVENT_WINDOW_SECONDS,
+          ':timeout' => $this->time->getCurrentTime() - self::FLOOD_EVENT_WINDOW_SECONDS,
         ])->fetchField() > self::FLOOD_EVENT_LIMIT;
   }
 
