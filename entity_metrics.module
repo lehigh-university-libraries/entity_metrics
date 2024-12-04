@@ -58,7 +58,7 @@ function entity_metrics_file_download($uri) {
         ':uri' => $uri,
       ])->fetchField();
     if ($mid) {
-      $config = \Drupal::config()->get('entity_metrics.settings');
+      $config = \Drupal::config('entity_metrics.settings');
       $cookieName = $config && $config->get('cookie');
       \Drupal::database()->insert('entity_metrics_data')
         ->fields([
