@@ -1,0 +1,8 @@
+# Schema for the configuration files of the Entity Metrics module.
+entity_metrics.settings:
+  type: config_object
+  label: 'Entity Metrics settings'
+  mapping:
+    cookie:
+      type: string
+      label: 'Cookie'

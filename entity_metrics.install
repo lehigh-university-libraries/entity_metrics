@@ -46,6 +46,12 @@ function entity_metrics_install() {
         'type' => 'int',
         'unsigned' => TRUE,
       ],
+      'cookie_set' => [
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => TRUE,
+        'default' => 0,
+      ],
     ],
     'primary key' => ['id'],
     'indexes' => [
@@ -100,7 +106,6 @@ function entity_metrics_install() {
   ];
 
   Database::getConnection()->schema()->createTable('entity_metrics_regions', $schema);
-
 }
 
 /**
@@ -109,4 +114,23 @@ function entity_metrics_install() {
 function entity_metrics_uninstall() {
   Database::getConnection()->schema()->dropTable('entity_metrics_data');
   Database::getConnection()->schema()->dropTable('entity_metrics_regions');
+}
+
+/**
+ * Add cookie_set field.
+ */
+function entity_metrics_update_10001() {
+  $schema = \Drupal::database()->schema();
+  if (!$schema->tableExists('entity_metrics_data')) {
+    return;
+  }
+  if ($schema->fieldExists('entity_metrics_data', 'cookie_set')) {
+    return;
+  }
+  $schema->addField('entity_metrics_data', 'cookie_set', [
+    'type' => 'int',
+    'size' => 'tiny',
+    'not null' => TRUE,
+    'default' => 0,
+  ]);
 }

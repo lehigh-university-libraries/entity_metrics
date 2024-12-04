@@ -1,0 +1,6 @@
+entity_metrics.settings:
+  title: Entity Metrics
+  description: Configure the entity metrics module
+  parent: system.admin_config_system
+  route_name: entity_metrics.settings
+  weight: 10

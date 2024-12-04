@@ -3,6 +3,7 @@
 namespace Drupal\entity_metrics\Controller;
 
 use Drupal\Component\Datetime\Time;
+use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Controller\ControllerBase;
 use Drupal\Core\Database\Connection;
 use Drupal\Core\Session\SessionManager;
@@ -40,6 +41,13 @@ class VisitController extends ControllerBase {
   protected $time;
 
   /**
+   * The config factory service.
+   *
+   * @var \Drupal\Core\Config\ConfigFactoryInterface
+   */
+  protected $configFactory;
+
+  /**
    * VisitController constructor.
    *
    * @param \Drupal\Core\Session\SessionManager $session
@@ -48,11 +56,14 @@ class VisitController extends ControllerBase {
    *   The database connection service.
    * @param \Drupal\Core\Datetime\TimeInterface $time
    *   The time service.
+   * @param \Drupal\Core\Config\ConfigFactoryInterface $config_factory
+   *   The config factory service.
    */
-  public function __construct(SessionManager $session, Connection $database, Time $time) {
+  public function __construct(SessionManager $session, Connection $database, Time $time, ConfigFactoryInterface $configFactory) {
     $this->session = $session;
     $this->database = $database;
     $this->time = $time;
+    $this->configFactory = $configFactory;
   }
 
   /**
@@ -62,7 +73,8 @@ class VisitController extends ControllerBase {
     return new static(
       $container->get('session_manager'),
       $container->get('database'),
-      $container->get('datetime.time')
+      $container->get('datetime.time'),
+      $container->get('config.factory')
     );
   }
 
@@ -80,6 +92,8 @@ class VisitController extends ControllerBase {
       return $response;
     }
 
+    $config = $this->configFactory->get('entity_metrics.settings');
+    $cookieName = $config->get('cookie');
     $currentPath = explode('/', $request->request->get('currentPath'));
     $entity_id = array_pop($currentPath);
     $this->database->insert('entity_metrics_data')
@@ -89,6 +103,7 @@ class VisitController extends ControllerBase {
         'session_id' => $this->session->getId(),
         'timestamp' => $this->time->getCurrentTime(),
         'ip_address' => $ip,
+        'cookie_set' => !empty($cookieName) && isset($_COOKIE[$cookieName]) && $_COOKIE[$cookieName] === '1' ? '1' : '0',
       ])
       ->execute();
     $response = new Response();
@@ -104,14 +119,16 @@ class VisitController extends ControllerBase {
       'monthly' => $this->database->query('SELECT COUNT(id) FROM {entity_metrics_data}
         WHERE entity_type = :type
           AND entity_id = :id
-          AND timestamp > :thirtyDays', [
+          AND timestamp > :thirtyDays
+          AND cookie_set = 0', [
             ':type' => $type,
             ':id' => $id,
             ':thirtyDays' => $this->time->getCurrentTime() - 2592000,
           ])->fetchField(),
       'total' => $this->database->query('SELECT COUNT(id) FROM {entity_metrics_data}
         WHERE entity_type = :type
-          AND entity_id = :id', [
+          AND entity_id = :id
+          AND cookie_set = 0', [
             ':type' => $type,
             ':id' => $id,
           ])->fetchField(),

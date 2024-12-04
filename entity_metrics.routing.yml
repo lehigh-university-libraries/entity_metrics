@@ -14,3 +14,11 @@ entity_metrics.view:
   methods: [GET]
   requirements:
     _permission: 'access content'
+
+entity_metrics.settings:
+  path: '/admin/config/system/entity-metrics'
+  defaults:
+    _title: 'Entity Metrics Settings'
+    _form: 'Drupal\entity_metrics\Form\SettingsForm'
+  requirements:
+    _permission: 'administer site configuration'
