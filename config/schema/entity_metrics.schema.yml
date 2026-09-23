@@ -6,3 +6,12 @@ entity_metrics.settings:
     cookie:
       type: string
       label: 'Cookie'
+    geolocation_enabled:
+      type: boolean
+      label: 'Process geolocation on cron'
+    geolocation_database:
+      type: string
+      label: 'Local City MMDB path'
+    geolocation_batch_size:
+      type: integer
+      label: 'Events processed per cron run'

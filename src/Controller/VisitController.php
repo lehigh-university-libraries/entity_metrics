@@ -2,69 +2,34 @@
 
 namespace Drupal\entity_metrics\Controller;
 
-use Drupal\Component\Datetime\Time;
+use Drupal\Component\Datetime\TimeInterface;
 use Drupal\Core\Config\ConfigFactoryInterface;
 use Drupal\Core\Controller\ControllerBase;
 use Drupal\Core\Database\Connection;
-use Drupal\Core\Session\SessionManager;
+use Drupal\Core\Entity\EntityTypeManagerInterface;
+use Drupal\Core\Session\SessionManagerInterface;
 use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
- * Controller for custom flood checks.
+ * Records and exposes counts only for valid, accessible entities.
  */
 class VisitController extends ControllerBase {
+
   const FLOOD_EVENT_LIMIT = 20;
   const FLOOD_EVENT_WINDOW_SECONDS = 60;
 
-  /**
-   * The session manager.
-   *
-   * @var \Drupal\Core\Session\SessionManager
-   */
-  protected $session;
-
-  /**
-   * The database connection.
-   *
-   * @var \Drupal\Core\Database\Connection
-   */
-  protected $database;
-
-  /**
-   * The time service.
-   *
-   * @var \Drupal\Component\Datetime\Time
-   */
-  protected $time;
-
-  /**
-   * The config factory service.
-   *
-   * @var \Drupal\Core\Config\ConfigFactoryInterface
-   */
-  protected $configFactory;
-
-  /**
-   * VisitController constructor.
-   *
-   * @param \Drupal\Core\Session\SessionManager $session
-   *   The Drupal session manager service.
-   * @param \Drupal\Core\Database\Connection $database
-   *   The database connection service.
-   * @param \Drupal\Core\Datetime\TimeInterface $time
-   *   The time service.
-   * @param \Drupal\Core\Config\ConfigFactoryInterface $config_factory
-   *   The config factory service.
-   */
-  public function __construct(SessionManager $session, Connection $database, Time $time, ConfigFactoryInterface $configFactory) {
-    $this->session = $session;
-    $this->database = $database;
-    $this->time = $time;
-    $this->configFactory = $configFactory;
-  }
+  public function __construct(
+    protected SessionManagerInterface $session,
+    protected Connection $database,
+    protected TimeInterface $time,
+    protected ConfigFactoryInterface $metricsConfig,
+    protected EntityTypeManagerInterface $entityTypes,
+  ) {}
 
   /**
    * {@inheritdoc}
@@ -74,78 +39,80 @@ class VisitController extends ControllerBase {
       $container->get('session_manager'),
       $container->get('database'),
       $container->get('datetime.time'),
-      $container->get('config.factory')
+      $container->get('config.factory'),
+      $container->get('entity_type.manager'),
     );
   }
 
   /**
-   * Record when a site visitor views an entity.
+   * Fails closed before recording visits or querying counts.
+   */
+  protected function requireViewableEntity($type, $id): void {
+    if (!in_array($type, ['node', 'media'], TRUE)
+      || (!is_string($id) && !is_int($id)) || !preg_match('/^[1-9][0-9]{0,9}$/D', (string) $id)
+      || (int) $id > 4294967295) {
+      throw new BadRequestHttpException('Invalid entity identifier.');
+    }
+    if (!$this->entityTypes->hasDefinition($type)) {
+      throw new NotFoundHttpException();
+    }
+    $entity = $this->entityTypes->getStorage($type)->load($id);
+    if (!$entity || !$entity->access('view', $this->currentUser())) {
+      throw new NotFoundHttpException();
+    }
+  }
+
+  /**
+   * Records visits only for canonical node paths supplied by Drupal's JS.
    */
   public function recordVisit(Request $request) {
-    $ip = $request->getClientIp();
-    if ($this->checkFlood($ip)) {
-      // Return a 429 response.
-      $response = new Response();
-      $response->setStatusCode(Response::HTTP_TOO_MANY_REQUESTS);
-      $response->setContent('Too Many Requests');
-
-      return $response;
+    $path = $request->request->all()['currentPath'] ?? NULL;
+    if (!is_string($path) || !preg_match('#^node/([1-9][0-9]{0,9})$#D', $path, $matches)) {
+      throw new BadRequestHttpException('A canonical node path is required.');
     }
-
-    $config = $this->configFactory->get('entity_metrics.settings');
-    $cookieName = $config->get('cookie');
-    $currentPath = explode('/', $request->request->get('currentPath'));
-    $entity_id = array_pop($currentPath);
-    $this->database->insert('entity_metrics_data')
-      ->fields([
-        'entity_type' => 'node',
-        'entity_id' => $entity_id,
-        'session_id' => $this->session->getId(),
-        'timestamp' => $this->time->getCurrentTime(),
-        'ip_address' => $ip,
-        'cookie_set' => !empty($cookieName) && isset($_COOKIE[$cookieName]) && $_COOKIE[$cookieName] === '1' ? '1' : '0',
-      ])
-      ->execute();
-    $response = new Response();
-    $response->setStatusCode(Response::HTTP_OK);
-    return $response;
+    $this->requireViewableEntity('node', $matches[1]);
+    $ip = $request->getClientIp();
+    if (!is_string($ip) || !filter_var($ip, FILTER_VALIDATE_IP)) {
+      throw new BadRequestHttpException('Invalid client address.');
+    }
+    if ($this->checkFlood($ip)) {
+      return new Response('Too Many Requests', Response::HTTP_TOO_MANY_REQUESTS, ['Cache-Control' => 'no-store']);
+    }
+    $cookie = $this->metricsConfig->get('entity_metrics.settings')->get('cookie');
+    $this->database->insert('entity_metrics_data')->fields([
+      'entity_type' => 'node',
+      'entity_id' => (int) $matches[1],
+      'session_id' => $this->session->getId(),
+      'timestamp' => $this->time->getCurrentTime(),
+      'ip_address' => $ip,
+      'cookie_set' => $cookie && $request->cookies->get($cookie) === '1' ? 1 : 0,
+    ])->execute();
+    return new Response('', Response::HTTP_OK, ['Cache-Control' => 'no-store']);
   }
 
   /**
-   * Get site visitor history views for a given entity.
+   * Returns counts only when the caller can view the entity.
    */
   public function getVisits($type, $id) {
-    return new JsonResponse([
-      'monthly' => $this->database->query('SELECT COUNT(id) FROM {entity_metrics_data}
-        WHERE entity_type = :type
-          AND entity_id = :id
-          AND timestamp > :thirtyDays
-          AND cookie_set = 0', [
-            ':type' => $type,
-            ':id' => $id,
-            ':thirtyDays' => $this->time->getCurrentTime() - 2592000,
-          ])->fetchField(),
-      'total' => $this->database->query('SELECT COUNT(id) FROM {entity_metrics_data}
-        WHERE entity_type = :type
-          AND entity_id = :id
-          AND cookie_set = 0', [
-            ':type' => $type,
-            ':id' => $id,
-          ])->fetchField(),
+    $this->requireViewableEntity($type, $id);
+    $query = $this->database->select('entity_metrics_data', 'd');
+    $query->condition('entity_type', $type)->condition('entity_id', $id)->condition('cookie_set', 0);
+    $query->addExpression('COUNT(*)', 'total');
+    $query->addExpression('COALESCE(SUM(CASE WHEN timestamp > :since THEN 1 ELSE 0 END), 0)', 'monthly', [
+      ':since' => $this->time->getCurrentTime() - 2592000,
     ]);
+    $counts = $query->execute()->fetchAssoc();
+    return new JsonResponse(array_map('intval', $counts), 200, ['Cache-Control' => 'no-store']);
   }
 
   /**
-   * Check the flood status.
+   * Limits each address to twenty events in a rolling minute.
    */
-  public function checkFlood(string $ip) : bool {
-    // Only allow recording 20 events every minute.
-    return $this->database->query('SELECT COUNT(id) FROM {entity_metrics_data}
-      WHERE ip_address = :ip
-        AND timestamp > :timeout', [
-          ':ip' => $ip,
-          ':timeout' => $this->time->getCurrentTime() - self::FLOOD_EVENT_WINDOW_SECONDS,
-        ])->fetchField() > self::FLOOD_EVENT_LIMIT;
+  public function checkFlood(string $ip): bool {
+    return $this->database->select('entity_metrics_data', 'd')
+      ->condition('ip_address', $ip)
+      ->condition('timestamp', $this->time->getCurrentTime() - self::FLOOD_EVENT_WINDOW_SECONDS, '>')
+      ->countQuery()->execute()->fetchField() >= self::FLOOD_EVENT_LIMIT;
   }
 
 }

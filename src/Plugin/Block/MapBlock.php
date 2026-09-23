@@ -81,7 +81,7 @@ class MapBlock extends BlockBase implements ContainerFactoryPluginInterface {
    * {@inheritdoc}
    */
   public function build() {
-    $build = [];
+    $build = ['#cache' => ['tags' => ['entity_metrics_regions']]];
     $build['header'] = [
       '#type' => 'html_tag',
       '#tag' => 'div',
@@ -99,14 +99,16 @@ class MapBlock extends BlockBase implements ContainerFactoryPluginInterface {
     ];
     $build['#attached']['library'][] = 'entity_metrics/map';
 
-    $results = $this->database->query("SELECT d.entity_id, d.timestamp, latitude, longitude, city, region, country
+    $query = "SELECT d.entity_id, d.timestamp, latitude, longitude, city, region, country
       FROM entity_metrics_data d
       INNER JOIN entity_metrics_regions r ON r.id = d.region_id
       INNER JOIN node__field_member_of m ON m.entity_id = d.entity_id
       WHERE d.entity_type = 'node' AND field_member_of_target_id = :id
-      GROUP BY FROM_UNIXTIME(d.timestamp, 'YYYMMMDD'), entity_id, city ", [
-        ':id' => $this->routeMatch->getParameter('node')->id(),
-      ]);
+        AND latitude IS NOT NULL AND longitude IS NOT NULL
+      GROUP BY FROM_UNIXTIME(d.timestamp, 'YYYMMMDD'), entity_id, city ";
+    $results = $this->database->query($query, [
+      ':id' => $this->routeMatch->getParameter('node')->id(),
+    ]);
 
     foreach ($results as $result) {
       $node = $this->entityTypeManager->getStorage('node')->load($result->entity_id);

@@ -4,4 +4,5 @@ description: 'Record page views and downloads for entities on your Drupal site'
 core_version_requirement: ^10 || ^11
 package: 'Statistics'
 dependencies:
-  - key:key
+  - drupal:node
+  - geoip_autoupdate:geoip_autoupdate

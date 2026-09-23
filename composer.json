@@ -1,13 +1,16 @@
 {
     "name": "drupal/entity_metrics",
     "type": "drupal-module",
-    "description": "My Awesome Module",
-    "keywords": [
-    ],
+    "description": "Record entity usage and enrich metrics with a local geolocation database.",
+    "keywords": [],
     "homepage": "https://www.drupal.org/project/entity_metrics",
     "minimum-stability": "dev",
     "support": {
         "issues": "https://www.drupal.org/project/issues/entity_metrics",
         "source": "http://cgit.drupalcode.org/entity_metrics"
+    },
+    "require": {
+        "drupal/geoip_autoupdate": "^1.0",
+        "maxmind-db/reader": "^1.14"
     }
 }

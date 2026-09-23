@@ -1,0 +1,4 @@
+cookie: ''
+geolocation_enabled: false
+geolocation_database: 'private://GeoLite2-City.mmdb'
+geolocation_batch_size: 500

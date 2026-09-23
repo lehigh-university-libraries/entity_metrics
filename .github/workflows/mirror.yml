@@ -1,7 +1,7 @@
 name: Mirror to drupal.org
 on:
   push:
-    branches: [1.0.x]
+    branches: [1.x]
     tags: '*'
 
 jobs:

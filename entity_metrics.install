@@ -46,6 +46,13 @@ function entity_metrics_install() {
         'type' => 'int',
         'unsigned' => TRUE,
       ],
+      'geolocation_status' => [
+        'description' => '0 pending, 1 located, 2 unknown.',
+        'type' => 'int',
+        'size' => 'tiny',
+        'not null' => TRUE,
+        'default' => 0,
+      ],
       'cookie_set' => [
         'type' => 'int',
         'size' => 'tiny',
@@ -57,6 +64,8 @@ function entity_metrics_install() {
     'indexes' => [
       'entity' => ['entity_type', 'entity_id'],
       'timestamp' => ['timestamp'],
+      'geolocation_pending' => ['geolocation_status', 'id'],
+      'ip_timestamp' => ['ip_address', 'timestamp'],
     ],
     'foreign keys' => [
       'region_id' => [
@@ -76,6 +85,7 @@ function entity_metrics_install() {
         'unsigned' => TRUE,
         'not null' => TRUE,
       ],
+      'location_key' => ['type' => 'varchar', 'length' => 64],
       'country' => [
         'type' => 'varchar',
         'length' => 255,
@@ -105,6 +115,7 @@ function entity_metrics_install() {
     ],
   ];
 
+  $schema['unique keys']['location_key'] = ['location_key'];
   Database::getConnection()->schema()->createTable('entity_metrics_regions', $schema);
 }
 
@@ -133,4 +144,51 @@ function entity_metrics_update_10001() {
     'not null' => TRUE,
     'default' => 0,
   ]);
+}
+
+/**
+ * Adds resumable geolocation state and indexed region lookup.
+ */
+function entity_metrics_update_10002(): void {
+  $schema = \Drupal::database()->schema();
+  if (!$schema->fieldExists('entity_metrics_data', 'geolocation_status')) {
+    $schema->addField('entity_metrics_data', 'geolocation_status', [
+      'description' => '0 pending, 1 located, 2 unknown.',
+      'type' => 'int',
+      'size' => 'tiny',
+      'not null' => TRUE,
+      'default' => 0,
+    ]);
+  }
+  if (!$schema->indexExists('entity_metrics_data', 'geolocation_pending')) {
+    $schema->addIndex('entity_metrics_data', 'geolocation_pending', ['geolocation_status', 'id'], [
+      'fields' => [
+        'geolocation_status' => ['type' => 'int', 'size' => 'tiny'],
+        'id' => ['type' => 'serial', 'unsigned' => TRUE],
+      ],
+    ]);
+  }
+  if (!$schema->indexExists('entity_metrics_data', 'ip_timestamp')) {
+    $schema->addIndex('entity_metrics_data', 'ip_timestamp', ['ip_address', 'timestamp'], [
+      'fields' => [
+        'ip_address' => ['type' => 'varchar', 'length' => 45],
+        'timestamp' => ['type' => 'int', 'unsigned' => TRUE],
+      ],
+    ]);
+  }
+  if (!$schema->fieldExists('entity_metrics_regions', 'location_key')) {
+    $schema->addField('entity_metrics_regions', 'location_key', ['type' => 'varchar', 'length' => 64]);
+    $schema->addUniqueKey('entity_metrics_regions', 'location_key', ['location_key']);
+  }
+  $config = \Drupal::configFactory()->getEditable('entity_metrics.settings');
+  foreach ([
+    'geolocation_enabled' => FALSE,
+    'geolocation_database' => 'private://GeoLite2-City.mmdb',
+    'geolocation_batch_size' => 500,
+  ] as $key => $value) {
+    if ($config->get($key) === NULL) {
+      $config->set($key, $value);
+    }
+  }
+  $config->save();
 }
