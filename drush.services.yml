@@ -1,6 +1,6 @@
 services:
   entity_metrics.commands:
     class: Drupal\entity_metrics\Commands\GeolocationCommands
-    arguments: ['@entity_metrics.geolocation', '@geoip_autoupdate.updater']
+    arguments: ['@entity_metrics.geolocation', '@geoip_autoupdate.updater', '@entity_metrics.rollup']
     tags:
       - { name: drush.command }

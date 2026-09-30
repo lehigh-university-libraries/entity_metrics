@@ -1,4 +1,7 @@
 services:
+  entity_metrics.rollup:
+    class: Drupal\entity_metrics\MetricsRollup
+    arguments: ['@database', '@lock', '@datetime.time']
   entity_metrics.geolocation:
     class: Drupal\entity_metrics\GeolocationBackfill
     arguments: ['@database', '@config.factory', '@file_system', '@lock', '@datetime.time']

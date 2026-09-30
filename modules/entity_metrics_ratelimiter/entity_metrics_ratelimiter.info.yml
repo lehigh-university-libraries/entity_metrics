@@ -1,0 +1,7 @@
+name: 'Entity Metrics Rate Limiter'
+type: module
+description: 'Limit recorded page views to twenty events per IP address per minute.'
+core_version_requirement: ^10 || ^11
+package: 'Statistics'
+dependencies:
+  - entity_metrics:entity_metrics

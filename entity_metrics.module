@@ -85,16 +85,21 @@ function entity_metrics_file_download($uri) {
  * Implements hook_cron().
  */
 function entity_metrics_cron(): void {
-  if (!\Drupal::config('entity_metrics.settings')->get('geolocation_enabled')) {
-    return;
+  if (\Drupal::config('entity_metrics.settings')->get('geolocation_enabled')) {
+    try {
+      $limit = (int) \Drupal::config('entity_metrics.settings')->get('geolocation_batch_size');
+      \Drupal::service('entity_metrics.geolocation')->process($limit ?: 500);
+    }
+    catch (\Throwable $exception) {
+      // Keep visitor identifiers out of operational logs.
+      \Drupal::logger('entity_metrics')->error('Local geolocation failed: @message', ['@message' => $exception->getMessage()]);
+    }
   }
   try {
-    $limit = (int) \Drupal::config('entity_metrics.settings')->get('geolocation_batch_size');
-    \Drupal::service('entity_metrics.geolocation')->process($limit ?: 500);
+    \Drupal::service('entity_metrics.rollup')->process();
   }
   catch (\Throwable $exception) {
-    // Neither IP addresses nor visitor identifiers belong in operational logs.
-    \Drupal::logger('entity_metrics')->error('Local geolocation failed: @message', ['@message' => $exception->getMessage()]);
+    \Drupal::logger('entity_metrics')->error('Metrics rollup failed; the batch was rolled back.');
   }
 }
 

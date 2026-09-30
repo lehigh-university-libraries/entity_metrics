@@ -99,16 +99,25 @@ class MapBlock extends BlockBase implements ContainerFactoryPluginInterface {
     ];
     $build['#attached']['library'][] = 'entity_metrics/map';
 
-    $query = "SELECT d.entity_id, d.timestamp, latitude, longitude, city, region, country
-      FROM entity_metrics_data d
-      INNER JOIN entity_metrics_regions r ON r.id = d.region_id
-      INNER JOIN node__field_member_of m ON m.entity_id = d.entity_id
-      WHERE d.entity_type = 'node' AND field_member_of_target_id = :id
-        AND latitude IS NOT NULL AND longitude IS NOT NULL
-      GROUP BY FROM_UNIXTIME(d.timestamp, 'YYYMMMDD'), entity_id, city ";
-    $results = $this->database->query($query, [
-      ':id' => $this->routeMatch->getParameter('node')->id(),
-    ]);
+    $members = $this->database->select('node__field_member_of', 'm')->fields('m', ['entity_id'])
+      ->condition('field_member_of_target_id', $this->routeMatch->getParameter('node')->id());
+    $events = $this->database->select('entity_metrics_data', 'e');
+    $events->fields('e', ['entity_id', 'region_id'])->condition('entity_type', 'node');
+    $events->condition('entity_id', $members, 'IN');
+    $events->addExpression('MAX(timestamp)', 'timestamp');
+    $events->addExpression('FLOOR(e.timestamp / 86400)', 'event_day');
+    $events->groupBy('entity_id')->groupBy('region_id')->groupBy('event_day');
+    $history = $this->database->select('entity_metrics_map', 'h');
+    $history->fields('h', ['entity_id', 'region_id'])->condition('entity_type', 'node');
+    $history->condition('entity_id', clone $members, 'IN');
+    $history->addField('h', 'last_timestamp', 'timestamp');
+    $history->addExpression('0', 'event_day');
+    $events->union($history, 'ALL');
+    $query = $this->database->select($events, 'd');
+    $query->innerJoin('entity_metrics_regions', 'r', 'r.id = d.region_id');
+    $query->fields('d', ['entity_id', 'timestamp'])->fields('r', ['latitude', 'longitude', 'city', 'region', 'country']);
+    $query->isNotNull('latitude')->isNotNull('longitude')->distinct();
+    $results = $query->execute();
 
     foreach ($results as $result) {
       $node = $this->entityTypeManager->getStorage('node')->load($result->entity_id);
