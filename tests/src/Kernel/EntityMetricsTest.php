@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace Drupal\Tests\entity_metrics\Kernel;
 
 use Drupal\Component\Datetime\TimeInterface;
+use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\Session\AnonymousUserSession;
 use Drupal\entity_metrics\Controller\VisitController;
 use Drupal\entity_metrics\GeolocationBackfill;
+use Drupal\entity_metrics\Plugin\Block\MapBlock;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
@@ -161,6 +163,53 @@ class EntityMetricsTest extends KernelTestBase {
     $this->assertFalse($db->schema()->indexExists('entity_metrics_data', 'ip_timestamp'));
     $this->assertTrue($db->schema()->indexExists('entity_metrics_data', 'timestamp'));
     $this->assertSame($id, (int) $db->select('entity_metrics_data')->fields('entity_metrics_data', ['id'])->execute()->fetchField());
+  }
+
+  /**
+   * The collection map reads raw events without any summary tables.
+   */
+  public function testMapUsesRawEvents(): void {
+    $node = Node::create(['type' => 'page', 'title' => 'Public', 'status' => 1]);
+    $node->save();
+    $database = $this->container->get('database');
+    $database->schema()->createTable('node__field_member_of', [
+      'fields' => [
+        'entity_id' => ['type' => 'int'],
+        'field_member_of_target_id' => ['type' => 'int'],
+      ],
+    ]);
+    $database->insert('node__field_member_of')->fields([
+      'entity_id' => $node->id(),
+      'field_member_of_target_id' => $node->id(),
+    ])->execute();
+    $this->event('2.125.160.216', time() - 400 * 86400);
+    $this->event('2.125.160.216');
+    $this->container->get('entity_metrics.geolocation')->process();
+    $route = $this->createMock(RouteMatchInterface::class);
+    $route->method('getParameter')->with('node')->willReturn($node);
+    $block = new MapBlock([], 'entity_metrics_map', ['provider' => 'entity_metrics'], $route, $database, $this->container->get('entity_type.manager'));
+    $points = $block->build()['#attached']['drupalSettings']['entityMetrics'];
+    $this->assertCount(2, $points);
+    $this->assertSame(['Public', 'Public'], array_column($points, 'label'));
+    $this->assertSame(['Boxford', 'Boxford'], array_column($points, 'city'));
+    $database->delete('node__field_member_of')->execute();
+    $this->assertArrayNotHasKey('drupalSettings', $block->build()['#attached']);
+  }
+
+  /**
+   * Cron enriches old events without deleting the source history for analytics.
+   */
+  public function testCronRetainsOldEvents(): void {
+    $id = $this->event('2.125.160.216', time() - 400 * 86400);
+    $this->config('entity_metrics.settings')->set('geolocation_enabled', TRUE)->save();
+    entity_metrics_cron();
+    entity_metrics_cron();
+    $event = $this->container->get('database')->select('entity_metrics_data', 'd')->fields('d')
+      ->condition('id', $id)->execute()->fetchObject();
+    $this->assertNotFalse($event);
+    $this->assertSame(1, (int) $event->geolocation_status);
+    $this->assertNotNull($event->region_id);
+    $this->assertNull($event->ip_address);
   }
 
   /**

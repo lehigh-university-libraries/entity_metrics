@@ -107,12 +107,6 @@ class MapBlock extends BlockBase implements ContainerFactoryPluginInterface {
     $events->addExpression('MAX(timestamp)', 'timestamp');
     $events->addExpression('FLOOR(e.timestamp / 86400)', 'event_day');
     $events->groupBy('entity_id')->groupBy('region_id')->groupBy('event_day');
-    $history = $this->database->select('entity_metrics_map', 'h');
-    $history->fields('h', ['entity_id', 'region_id'])->condition('entity_type', 'node');
-    $history->condition('entity_id', clone $members, 'IN');
-    $history->addField('h', 'last_timestamp', 'timestamp');
-    $history->addExpression('0', 'event_day');
-    $events->union($history, 'ALL');
     $query = $this->database->select($events, 'd');
     $query->innerJoin('entity_metrics_regions', 'r', 'r.id = d.region_id');
     $query->fields('d', ['entity_id', 'timestamp'])->fields('r', ['latitude', 'longitude', 'city', 'region', 'country']);

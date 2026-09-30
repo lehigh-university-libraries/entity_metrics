@@ -116,17 +116,12 @@ function entity_metrics_install() {
 
   $schema['unique keys']['location_key'] = ['location_key'];
   Database::getConnection()->schema()->createTable('entity_metrics_regions', $schema);
-  foreach (entity_metrics_rollup_schema() as $table => $definition) {
-    Database::getConnection()->schema()->createTable($table, $definition);
-  }
 }
 
 /**
  * Implements hook_uninstall().
  */
 function entity_metrics_uninstall() {
-  Database::getConnection()->schema()->dropTable('entity_metrics_counts');
-  Database::getConnection()->schema()->dropTable('entity_metrics_map');
   Database::getConnection()->schema()->dropTable('entity_metrics_data');
   Database::getConnection()->schema()->dropTable('entity_metrics_regions');
 }
@@ -198,47 +193,4 @@ function entity_metrics_update_10003(): void {
     && $schema->indexExists('entity_metrics_data', 'ip_timestamp')) {
     $schema->dropIndex('entity_metrics_data', 'ip_timestamp');
   }
-}
-
-/**
- * Creates summary tables without changing or deleting existing events.
- */
-function entity_metrics_update_10004(): void {
-  $schema = \Drupal::database()->schema();
-  foreach (entity_metrics_rollup_schema() as $table => $definition) {
-    if (!$schema->tableExists($table)) {
-      $schema->createTable($table, $definition);
-    }
-  }
-}
-
-/**
- * Defines the retained count and map summaries for installs and upgrades.
- */
-function entity_metrics_rollup_schema(): array {
-  $entity_fields = [
-    'entity_type' => ['type' => 'varchar', 'length' => 32, 'not null' => TRUE],
-    'entity_id' => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
-  ];
-  $count = ['type' => 'int', 'size' => 'big', 'unsigned' => TRUE, 'not null' => TRUE];
-  return [
-    'entity_metrics_counts' => [
-      'fields' => $entity_fields + [
-        'cookie_set' => ['type' => 'int', 'size' => 'tiny', 'not null' => TRUE],
-        'granularity' => ['type' => 'varchar', 'length' => 5, 'not null' => TRUE],
-        'period' => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
-        'event_count' => $count,
-      ],
-      'primary key' => ['entity_type', 'entity_id', 'cookie_set', 'granularity', 'period'],
-      'indexes' => ['aging' => ['granularity', 'period']],
-    ],
-    'entity_metrics_map' => [
-      'fields' => $entity_fields + [
-        'region_id' => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
-        'event_count' => $count,
-        'last_timestamp' => ['type' => 'int', 'unsigned' => TRUE, 'not null' => TRUE],
-      ],
-      'primary key' => ['entity_type', 'entity_id', 'region_id'],
-    ],
-  ];
 }

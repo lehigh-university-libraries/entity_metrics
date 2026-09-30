@@ -96,16 +96,7 @@ class VisitController extends ControllerBase {
     $query->addExpression('COALESCE(SUM(CASE WHEN timestamp > :since THEN 1 ELSE 0 END), 0)', 'monthly', [
       ':since' => $this->time->getCurrentTime() - 2592000,
     ]);
-    $history = $this->database->select('entity_metrics_counts', 'c');
-    $history->condition('entity_type', $type)->condition('entity_id', $id)->condition('cookie_set', 0);
-    $history->addExpression('COALESCE(SUM(event_count), 0)', 'total');
-    $history->addExpression('0', 'monthly');
-    $query->union($history, 'ALL');
-    // A single statement sees either side of a rollup commit, never both.
-    $combined = $this->database->select($query, 'counts');
-    $combined->addExpression('SUM(total)', 'total');
-    $combined->addExpression('SUM(monthly)', 'monthly');
-    $counts = $combined->execute()->fetchAssoc();
+    $counts = $query->execute()->fetchAssoc();
     return new JsonResponse(array_map('intval', $counts), 200, ['Cache-Control' => 'no-store']);
   }
 

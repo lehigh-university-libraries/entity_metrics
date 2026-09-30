@@ -83,53 +83,14 @@ drush entity-metrics:geolocate --retry-unknown --batch-size=1000
 - Missing/corrupt databases and failed transactions leave events pending for a
   later run. Database refresh failure preserves the previous working MMDB.
 
-External aggregate reports do not automatically change when source rows receive
-regions. Consumers such as Lehigh Analytics must read retained summaries as well
-as raw events before rebuilding after historical enrichment. A rebuild from only
-`entity_metrics_data` will omit events already rolled up.
-
-## Retained history and rollups
-
-Rollups are part of the main module. Run `drush updb -y` and `drush cr` when
-upgrading; update 10004 creates the summary tables without deleting any events.
-Each cron run then processes one bounded batch. To drain the backlog manually:
+Existing aggregate reports do not automatically change when source rows receive
+regions. For Lehigh Analytics, rebuild after historical enrichment:
 
 ```sh
-drush entity-metrics:rollup --batch-size=500
+drush lehigh-analytics:refresh --rebuild
 ```
 
-- The most recent 31 days remain raw, preserving the exact rolling 30-day count
-  and the optional rate limiter's recent IP lookup.
-- `entity_metrics_counts` retains daily counts grouped by entity type, ID, and
-  `cookie_set`. Complete months older than a year compact into monthly counts.
-  UTC defines days and months; the month containing the one-year boundary remains
-  daily until the following month. Older backfilled events go directly into
-  monthly buckets when eligible.
-- `entity_metrics_map` retains one row per entity type, ID, and `region_id`,
-  including an event count and the latest timestamp. Region records retain the
-  coordinates and labels. Old map entries no longer repeat once per visit day.
-- Only resolved events with an existing region and a cleared IP are eligible.
-  Pending, unresolved, or inconsistent geolocation rows remain raw, including
-  addresses awaiting a database retry. Sites without geolocation will therefore
-  retain their raw events.
-
-Each transaction locks its source rows, writes both summaries, and reads back
-their exact keys, counts, and latest map timestamps. Only after verification
-does it delete those specific source IDs. Daily-to-monthly compaction likewise
-verifies the destination before deleting daily rows. A mismatch or SQL failure
-rolls back the entire batch, including any earlier deletions. Re-running resumes
-from remaining source rows without counting events twice. Use transactional
-database tables (Drupal's default InnoDB on MySQL/MariaDB).
-
-The visit-count endpoint and map read raw events and summaries in single SQL
-statements so concurrent rollups cannot create a gap or double count. Staff
-exclusion on counts, collection membership, and map view-access checks remain
-in effect. Individual timestamps and session IDs are intentionally discarded
-after rollup; this is not an event-level archive.
-
-Update any external reports that query only `entity_metrics_data` before cron
-runs on the upgraded site. Backups must include both summary tables and
-`entity_metrics_regions`, in addition to the remaining raw events.
+Repeat the rebuild if further enrichment changes already-aggregated events.
 
 ## Tracking validation
 
@@ -163,12 +124,17 @@ window between batches. Events inserted after it starts are excluded.
 This is a heuristic: historical events do not store the Range header. Downloads
 by different visitors in the same region within that hour are grouped together
 and will also be deleted if the group has multiple hits.
-Back up before updating and pause cron and metrics maintenance jobs during the
-update. Run after geolocation has assigned regions and before rollup discards
-individual events. Already rolled-up counts
-cannot be deduplicated from the retained summaries; restore raw events from an
-archive if those counts need correction. Rebuild external aggregate reports after
-cleanup. Each batch shares the geolocation and rollup lock.
+Back up before updating and pause cron and analytics refresh jobs during cleanup
+and rebuilding. Run the update after geolocation has assigned regions. Each batch
+shares the geolocation lock. After cleanup, rebuild Lehigh Analytics from the
+remaining raw events before resuming scheduled jobs:
+
+```sh
+drush lehigh-analytics:refresh --rebuild
+```
+
+Raw events are not deleted based on age. Analytics maintains its own report totals;
+the cleanup above removes only the suspected viewer groups.
 
 ## Optional rate limiting
 
@@ -200,6 +166,6 @@ and rate limiting remains off. Fresh main-module installs omit the index.
 
 Drupal kernel tests under `tests/src/Kernel` cover tracking validation, local
 IPv4/IPv6 lookup, resumable batches, schema upgrades, optional rate limiting and
-its index lifecycle, rollup retention and report reads, monthly compaction, and
-transaction rollback after failed verification or writes.
+its index lifecycle, raw-event retention on cron, viewer cleanup, and transaction
+rollback after failed writes.
 Fixtures are synthetic MaxMind test databases, not production lookup data.

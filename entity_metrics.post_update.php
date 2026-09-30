@@ -14,7 +14,7 @@ function entity_metrics_post_update_deduplicate_media_downloads(&$sandbox = []) 
   $database = \Drupal::database();
   $lock = \Drupal::lock();
   if (!$lock->acquire('entity_metrics.geolocation', 300)) {
-    throw new RuntimeException('Geolocation or metrics rollup is already running. Retry the update when it finishes.');
+    throw new RuntimeException('Geolocation or download cleanup is already running. Retry the update when it finishes.');
   }
   try {
     $query = $database->select('entity_metrics_data', 'd')
