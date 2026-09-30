@@ -65,7 +65,6 @@ function entity_metrics_install() {
       'entity' => ['entity_type', 'entity_id'],
       'timestamp' => ['timestamp'],
       'geolocation_pending' => ['geolocation_status', 'id'],
-      'ip_timestamp' => ['ip_address', 'timestamp'],
     ],
     'foreign keys' => [
       'region_id' => [
@@ -165,14 +164,6 @@ function entity_metrics_update_10002(): void {
       'fields' => [
         'geolocation_status' => ['type' => 'int', 'size' => 'tiny'],
         'id' => ['type' => 'serial', 'unsigned' => TRUE],
-      ],
-    ]);
-  }
-  if (!$schema->indexExists('entity_metrics_data', 'ip_timestamp')) {
-    $schema->addIndex('entity_metrics_data', 'ip_timestamp', ['ip_address', 'timestamp'], [
-      'fields' => [
-        'ip_address' => ['type' => 'varchar', 'length' => 45],
-        'timestamp' => ['type' => 'int', 'unsigned' => TRUE],
       ],
     ]);
   }

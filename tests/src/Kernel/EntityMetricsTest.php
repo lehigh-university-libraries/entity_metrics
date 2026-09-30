@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\entity_metrics\Kernel;
 
+use Drupal\Component\Datetime\TimeInterface;
+use Drupal\Core\Routing\RouteMatchInterface;
 use Drupal\Core\Session\AnonymousUserSession;
 use Drupal\entity_metrics\Controller\VisitController;
 use Drupal\entity_metrics\GeolocationBackfill;
+use Drupal\entity_metrics\Plugin\Block\MapBlock;
 use Drupal\KernelTests\KernelTestBase;
 use Drupal\node\Entity\Node;
 use Drupal\node\Entity\NodeType;
@@ -38,6 +41,7 @@ class EntityMetricsTest extends KernelTestBase {
     $this->installSchema('node', ['node_access']);
     $this->installConfig(['system', 'entity_metrics']);
     $this->container->get('module_handler')->loadInclude('entity_metrics', 'install');
+    $this->container->get('module_handler')->loadInclude('entity_metrics', 'post_update.php');
     entity_metrics_install();
     Role::create(['id' => 'anonymous', 'label' => 'Anonymous'])->grantPermission('access content')->save();
     $this->container->get('current_user')->setAccount(new AnonymousUserSession());
@@ -82,15 +86,131 @@ class EntityMetricsTest extends KernelTestBase {
     $db = $this->container->get('database');
     $this->assertSame(0, (int) $db->select('entity_metrics_data')->countQuery()->execute()->fetchField());
     $request = Request::create('/', 'POST', ['currentPath' => 'node/' . $node->id()], [], [], ['REMOTE_ADDR' => '2.125.160.216']);
-    for ($i = 0; $i < 20; $i++) {
+    for ($i = 0; $i < 21; $i++) {
       $this->assertSame(200, $controller->recordVisit($request)->getStatusCode());
     }
-    $this->assertSame(429, $controller->recordVisit($request)->getStatusCode());
-    $this->assertSame(['total' => 20, 'monthly' => 20], json_decode($controller->getVisits('node', $node->id())->getContent(), TRUE));
+    $this->assertSame(['total' => 21, 'monthly' => 21], json_decode($controller->getVisits('node', $node->id())->getContent(), TRUE));
+    $this->assertFalse($db->schema()->indexExists('entity_metrics_data', 'ip_timestamp'));
     $this->assertTrue($controller->getVisits('node', $node->id())->headers->hasCacheControlDirective('no-store'));
     $this->container->get('router.builder')->rebuild();
     $route = $this->container->get('router.route_provider')->getRouteByName('entity_metrics.view');
     $this->assertSame('[1-9][0-9]{0,9}', $route->getRequirement('id'));
+  }
+
+  /**
+   * The optional limiter owns its index and rejects only recent matching IPs.
+   */
+  public function testOptionalRateLimiter(): void {
+    $this->enableModules(['entity_metrics_ratelimiter']);
+    $this->container->get('module_handler')->loadInclude('entity_metrics_ratelimiter', 'install');
+    entity_metrics_ratelimiter_install();
+    // Installing over an existing index adopts it without failing.
+    entity_metrics_ratelimiter_install();
+    entity_metrics_post_update_remove_unused_ip_index();
+    $db = $this->container->get('database');
+    $this->assertTrue($db->schema()->indexExists('entity_metrics_data', 'ip_timestamp'));
+
+    $now = time();
+    $time = $this->createMock(TimeInterface::class);
+    $time->method('getCurrentTime')->willReturn($now);
+    $time->method('getRequestTime')->willReturn($now);
+    $this->container->set('datetime.time', $time);
+    $controller = VisitController::create($this->container);
+    $node = Node::create(['type' => 'page', 'title' => 'Public', 'status' => 1]);
+    $node->save();
+    // Neither expired events nor other addresses consume this IP's allowance.
+    for ($i = 0; $i < 20; $i++) {
+      $this->event('2.125.160.216', $now - 60);
+      $this->event('2001:218::', $now);
+    }
+    $request = Request::create('/', 'POST', ['currentPath' => 'node/' . $node->id()], [], [], ['REMOTE_ADDR' => '2.125.160.216']);
+    for ($i = 0; $i < 20; $i++) {
+      $this->assertSame(200, $controller->recordVisit($request)->getStatusCode());
+    }
+    foreach (['2.125.160.216', '2001:218::'] as $ip) {
+      $request->server->set('REMOTE_ADDR', $ip);
+      try {
+        $controller->recordVisit($request);
+        $this->fail('The twenty-first event was accepted.');
+      }
+      catch (HttpExceptionInterface $exception) {
+        $this->assertSame(429, $exception->getStatusCode());
+        $this->assertSame('no-store', $exception->getHeaders()['Cache-Control']);
+      }
+    }
+    $this->assertSame(60, (int) $db->select('entity_metrics_data')->countQuery()->execute()->fetchField());
+
+    entity_metrics_ratelimiter_uninstall();
+    $this->disableModules(['entity_metrics_ratelimiter']);
+    $this->assertFalse($db->schema()->indexExists('entity_metrics_data', 'ip_timestamp'));
+    $this->assertSame(200, VisitController::create($this->container)->recordVisit($request)->getStatusCode());
+    $this->assertSame(61, (int) $db->select('entity_metrics_data')->countQuery()->execute()->fetchField());
+  }
+
+  /**
+   * Existing sites can release the index without enabling rate limiting.
+   */
+  public function testRateLimiterIndexUpgrade(): void {
+    $db = $this->container->get('database');
+    $db->schema()->addIndex('entity_metrics_data', 'ip_timestamp', ['ip_address', 'timestamp'], [
+      'fields' => [
+        'ip_address' => ['type' => 'varchar', 'length' => 45],
+        'timestamp' => ['type' => 'int', 'unsigned' => TRUE],
+      ],
+    ]);
+    $id = $this->event('2.125.160.216');
+    entity_metrics_post_update_remove_unused_ip_index();
+    entity_metrics_post_update_remove_unused_ip_index();
+    $this->assertFalse($db->schema()->indexExists('entity_metrics_data', 'ip_timestamp'));
+    $this->assertTrue($db->schema()->indexExists('entity_metrics_data', 'timestamp'));
+    $this->assertSame($id, (int) $db->select('entity_metrics_data')->fields('entity_metrics_data', ['id'])->execute()->fetchField());
+  }
+
+  /**
+   * The collection map reads raw events without any summary tables.
+   */
+  public function testMapUsesRawEvents(): void {
+    $node = Node::create(['type' => 'page', 'title' => 'Public', 'status' => 1]);
+    $node->save();
+    $database = $this->container->get('database');
+    $database->schema()->createTable('node__field_member_of', [
+      'fields' => [
+        'entity_id' => ['type' => 'int'],
+        'field_member_of_target_id' => ['type' => 'int'],
+      ],
+    ]);
+    $database->insert('node__field_member_of')->fields([
+      'entity_id' => $node->id(),
+      'field_member_of_target_id' => $node->id(),
+    ])->execute();
+    $this->event('2.125.160.216', time() - 400 * 86400);
+    $this->event('2.125.160.216');
+    $this->container->get('entity_metrics.geolocation')->process();
+    $route = $this->createMock(RouteMatchInterface::class);
+    $route->method('getParameter')->with('node')->willReturn($node);
+    $block = new MapBlock([], 'entity_metrics_map', ['provider' => 'entity_metrics'], $route, $database, $this->container->get('entity_type.manager'));
+    $points = $block->build()['#attached']['drupalSettings']['entityMetrics'];
+    $this->assertCount(2, $points);
+    $this->assertSame(['Public', 'Public'], array_column($points, 'label'));
+    $this->assertSame(['Boxford', 'Boxford'], array_column($points, 'city'));
+    $database->delete('node__field_member_of')->execute();
+    $this->assertArrayNotHasKey('drupalSettings', $block->build()['#attached']);
+  }
+
+  /**
+   * Cron enriches old events without deleting the source history for analytics.
+   */
+  public function testCronRetainsOldEvents(): void {
+    $id = $this->event('2.125.160.216', time() - 400 * 86400);
+    $this->config('entity_metrics.settings')->set('geolocation_enabled', TRUE)->save();
+    entity_metrics_cron();
+    entity_metrics_cron();
+    $event = $this->container->get('database')->select('entity_metrics_data', 'd')->fields('d')
+      ->condition('id', $id)->execute()->fetchObject();
+    $this->assertNotFalse($event);
+    $this->assertSame(1, (int) $event->geolocation_status);
+    $this->assertNotNull($event->region_id);
+    $this->assertNull($event->ip_address);
   }
 
   /**
@@ -175,7 +295,6 @@ class EntityMetricsTest extends KernelTestBase {
     $db = $this->container->get('database');
     $schema = $db->schema();
     $schema->dropIndex('entity_metrics_data', 'geolocation_pending');
-    $schema->dropIndex('entity_metrics_data', 'ip_timestamp');
     $schema->dropField('entity_metrics_data', 'geolocation_status');
     $schema->dropUniqueKey('entity_metrics_regions', 'location_key');
     $schema->dropField('entity_metrics_regions', 'location_key');

@@ -99,8 +99,73 @@ existing nodes the caller can view. Negative, zero, malformed, oversized, missin
 and inaccessible IDs fail before inserting events. Count requests similarly
 validate the allowed entity type (`node` or `media`), ID, and view access.
 
+Media downloads count only requests without a `Range` header. All range requests
+are excluded, including ranges starting at zero. These counts represent requests
+for whole files, not confirmation that the transfer completed.
+
+### Clean up historical progressive downloads
+
+The post-update hook in `entity_metrics.post_update.php` automatically cleans up
+existing raw download events when you run:
+
+```sh
+drush updb -y
+```
+
+Events are grouped by media ID and region ID within 3600 seconds of the first hit
+(lowest ID breaks timestamp ties). Groups with multiple hits are treated as viewer
+traffic and deleted entirely, including the first hit. Single-hit groups remain.
+A 12:45 hit groups through 13:45, across the 13:00 clock-hour boundary. Repeats do
+not extend the window, even after the first hit is deleted. The next event beyond
+that window starts a new window. Events without a region ID and node views are
+left alone. The update scans 500 rows per transaction and preserves the current
+window between batches. Events inserted after it starts are excluded.
+
+This is a heuristic: historical events do not store the Range header. Downloads
+by different visitors in the same region within that hour are grouped together
+and will also be deleted if the group has multiple hits.
+Back up before updating and pause cron and analytics refresh jobs during cleanup
+and rebuilding. Run the update after geolocation has assigned regions. Each batch
+shares the geolocation lock. After cleanup, rebuild Lehigh Analytics from the
+remaining raw events before resuming scheduled jobs:
+
+```sh
+drush lehigh-analytics:refresh --rebuild
+```
+
+Raw events are not deleted based on age. Analytics maintains its own report totals;
+the cleanup above removes only the suspected viewer groups.
+
+## Optional rate limiting
+
+The main module does not rate-limit page views. To limit recording to twenty
+events per IP address in a rolling minute, enable the optional submodule:
+
+```sh
+drush en entity_metrics_ratelimiter -y
+```
+
+The submodule rejects further page views with HTTP 429 before inserting an event.
+As before, recent page views and media downloads both count toward the limit;
+downloads themselves are not rate-limited. Geolocation retains addresses from
+the most recent minute so the check can count them.
+
+Installing the submodule creates `ip_timestamp` on
+`entity_metrics_data (ip_address, timestamp)`, or adopts the existing index.
+Uninstalling it removes the index without deleting metrics:
+
+```sh
+drush pm:uninstall entity_metrics_ratelimiter -y
+```
+
+When upgrading an existing site, enable the submodule **before** `drush updb` to
+retain rate limiting and its index. Otherwise, the post-update removes the old index
+and rate limiting remains off. Fresh main-module installs omit the index.
+
 ## Tests
 
 Drupal kernel tests under `tests/src/Kernel` cover tracking validation, local
-IPv4/IPv6 lookup, resumable batches, schema upgrades, and transaction rollback.
+IPv4/IPv6 lookup, resumable batches, schema upgrades, optional rate limiting and
+its index lifecycle, raw-event retention on cron, viewer cleanup, and transaction
+rollback after failed writes.
 Fixtures are synthetic MaxMind test databases, not production lookup data.

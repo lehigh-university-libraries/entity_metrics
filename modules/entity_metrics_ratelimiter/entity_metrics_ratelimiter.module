@@ -1,0 +1,21 @@
+<?php
+
+/**
+ * @file
+ * Optional per-address rate limiting for Entity Metrics page views.
+ */
+
+use Symfony\Component\HttpKernel\Exception\TooManyRequestsHttpException;
+
+/**
+ * Implements hook_entity_metrics_visit_presave().
+ */
+function entity_metrics_ratelimiter_entity_metrics_visit_presave(string $ip): void {
+  $count = \Drupal::database()->select('entity_metrics_data', 'd')
+    ->condition('ip_address', $ip)
+    ->condition('timestamp', \Drupal::time()->getCurrentTime() - 60, '>')
+    ->countQuery()->execute()->fetchField();
+  if ($count >= 20) {
+    throw new TooManyRequestsHttpException(NULL, 'Too Many Requests', NULL, 0, ['Cache-Control' => 'no-store']);
+  }
+}

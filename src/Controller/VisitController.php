@@ -20,9 +20,6 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  */
 class VisitController extends ControllerBase {
 
-  const FLOOD_EVENT_LIMIT = 20;
-  const FLOOD_EVENT_WINDOW_SECONDS = 60;
-
   public function __construct(
     protected SessionManagerInterface $session,
     protected Connection $database,
@@ -75,9 +72,7 @@ class VisitController extends ControllerBase {
     if (!is_string($ip) || !filter_var($ip, FILTER_VALIDATE_IP)) {
       throw new BadRequestHttpException('Invalid client address.');
     }
-    if ($this->checkFlood($ip)) {
-      return new Response('Too Many Requests', Response::HTTP_TOO_MANY_REQUESTS, ['Cache-Control' => 'no-store']);
-    }
+    $this->moduleHandler()->invokeAll('entity_metrics_visit_presave', [$ip]);
     $cookie = $this->metricsConfig->get('entity_metrics.settings')->get('cookie');
     $this->database->insert('entity_metrics_data')->fields([
       'entity_type' => 'node',
@@ -103,16 +98,6 @@ class VisitController extends ControllerBase {
     ]);
     $counts = $query->execute()->fetchAssoc();
     return new JsonResponse(array_map('intval', $counts), 200, ['Cache-Control' => 'no-store']);
-  }
-
-  /**
-   * Limits each address to twenty events in a rolling minute.
-   */
-  public function checkFlood(string $ip): bool {
-    return $this->database->select('entity_metrics_data', 'd')
-      ->condition('ip_address', $ip)
-      ->condition('timestamp', $this->time->getCurrentTime() - self::FLOOD_EVENT_WINDOW_SECONDS, '>')
-      ->countQuery()->execute()->fetchField() >= self::FLOOD_EVENT_LIMIT;
   }
 
 }

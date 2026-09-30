@@ -1,0 +1,32 @@
+<?php
+
+/**
+ * @file
+ * Manages the index used by the optional Entity Metrics rate limiter.
+ */
+
+/**
+ * Implements hook_install().
+ */
+function entity_metrics_ratelimiter_install(): void {
+  $schema = \Drupal::database()->schema();
+  if (!$schema->indexExists('entity_metrics_data', 'ip_timestamp')) {
+    $schema->addIndex('entity_metrics_data', 'ip_timestamp', ['ip_address', 'timestamp'], [
+      'fields' => [
+        'ip_address' => ['type' => 'varchar', 'length' => 45],
+        'timestamp' => ['type' => 'int', 'unsigned' => TRUE],
+      ],
+    ]);
+  }
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function entity_metrics_ratelimiter_uninstall(): void {
+  $schema = \Drupal::database()->schema();
+  if ($schema->tableExists('entity_metrics_data')
+    && $schema->indexExists('entity_metrics_data', 'ip_timestamp')) {
+    $schema->dropIndex('entity_metrics_data', 'ip_timestamp');
+  }
+}
