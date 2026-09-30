@@ -99,6 +99,38 @@ existing nodes the caller can view. Negative, zero, malformed, oversized, missin
 and inaccessible IDs fail before inserting events. Count requests similarly
 validate the allowed entity type (`node` or `media`), ID, and view access.
 
+Media downloads count only requests without a `Range` header. All range requests
+are excluded, including ranges starting at zero. These counts represent requests
+for whole files, not confirmation that the transfer completed.
+
+### Clean up historical progressive downloads
+
+The post-update hook in `entity_metrics.post_update.php` automatically cleans up
+existing raw download events when you run:
+
+```sh
+drush updb -y
+```
+
+Events are grouped by media ID and region ID within 3600 seconds of the first hit
+(lowest ID breaks timestamp ties). Groups with multiple hits are treated as viewer
+traffic and deleted entirely, including the first hit. Single-hit groups remain.
+A 12:45 hit groups through 13:45, across the 13:00 clock-hour boundary. Repeats do
+not extend the window, even after the first hit is deleted. The next event beyond
+that window starts a new window. Events without a region ID and node views are
+left alone. The update scans 500 rows per transaction and preserves the current
+window between batches. Events inserted after it starts are excluded.
+
+This is a heuristic: historical events do not store the Range header. Downloads
+by different visitors in the same region within that hour are grouped together
+and will also be deleted if the group has multiple hits.
+Back up before updating and pause cron and metrics maintenance jobs during the
+update. Run after geolocation has assigned regions and before rollup discards
+individual events. Already rolled-up counts
+cannot be deduplicated from the retained summaries; restore raw events from an
+archive if those counts need correction. Rebuild external aggregate reports after
+cleanup. Each batch shares the geolocation and rollup lock.
+
 ## Tests
 
 Drupal kernel tests under `tests/src/Kernel` cover tracking validation, local

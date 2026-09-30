@@ -40,7 +40,12 @@ function entity_metrics_preprocess_node(&$variables) {
 function entity_metrics_file_download($uri) {
   $scheme = StreamWrapperManager::getScheme($uri);
   if ($scheme == 'fedora') {
-    $ip = \Drupal::requestStack()->getCurrentRequest()->getClientIp();
+    $request = \Drupal::requestStack()->getCurrentRequest();
+    // Count whole-file requests only, excluding every partial-content request.
+    if ($request->headers->has('Range')) {
+      return NULL;
+    }
+    $ip = $request->getClientIp();
     $first_octet = substr($ip, 0, 3);
     // Do not record metrics on internal networking requests.
     if (in_array($first_octet, ['127', '172', '192'])) {
