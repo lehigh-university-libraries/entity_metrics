@@ -41,6 +41,7 @@ class EntityMetricsTest extends KernelTestBase {
     $this->installSchema('node', ['node_access']);
     $this->installConfig(['system', 'entity_metrics']);
     $this->container->get('module_handler')->loadInclude('entity_metrics', 'install');
+    $this->container->get('module_handler')->loadInclude('entity_metrics', 'post_update.php');
     entity_metrics_install();
     Role::create(['id' => 'anonymous', 'label' => 'Anonymous'])->grantPermission('access content')->save();
     $this->container->get('current_user')->setAccount(new AnonymousUserSession());
@@ -105,7 +106,7 @@ class EntityMetricsTest extends KernelTestBase {
     entity_metrics_ratelimiter_install();
     // Installing over an existing index adopts it without failing.
     entity_metrics_ratelimiter_install();
-    entity_metrics_update_10003();
+    entity_metrics_post_update_remove_unused_ip_index();
     $db = $this->container->get('database');
     $this->assertTrue($db->schema()->indexExists('entity_metrics_data', 'ip_timestamp'));
 
@@ -158,8 +159,8 @@ class EntityMetricsTest extends KernelTestBase {
       ],
     ]);
     $id = $this->event('2.125.160.216');
-    entity_metrics_update_10003();
-    entity_metrics_update_10003();
+    entity_metrics_post_update_remove_unused_ip_index();
+    entity_metrics_post_update_remove_unused_ip_index();
     $this->assertFalse($db->schema()->indexExists('entity_metrics_data', 'ip_timestamp'));
     $this->assertTrue($db->schema()->indexExists('entity_metrics_data', 'timestamp'));
     $this->assertSame($id, (int) $db->select('entity_metrics_data')->fields('entity_metrics_data', ['id'])->execute()->fetchField());

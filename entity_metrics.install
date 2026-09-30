@@ -183,14 +183,3 @@ function entity_metrics_update_10002(): void {
   }
   $config->save();
 }
-
-/**
- * Removes the IP index unless the optional rate limiter owns it.
- */
-function entity_metrics_update_10003(): void {
-  $schema = \Drupal::database()->schema();
-  if (!\Drupal::moduleHandler()->moduleExists('entity_metrics_ratelimiter')
-    && $schema->indexExists('entity_metrics_data', 'ip_timestamp')) {
-    $schema->dropIndex('entity_metrics_data', 'ip_timestamp');
-  }
-}

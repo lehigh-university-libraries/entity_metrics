@@ -8,6 +8,17 @@
 use Drupal\Core\Cache\Cache;
 
 /**
+ * Removes the IP index unless the optional rate limiter owns it.
+ */
+function entity_metrics_post_update_remove_unused_ip_index(): void {
+  $schema = \Drupal::database()->schema();
+  if (!\Drupal::moduleHandler()->moduleExists('entity_metrics_ratelimiter')
+    && $schema->indexExists('entity_metrics_data', 'ip_timestamp')) {
+    $schema->dropIndex('entity_metrics_data', 'ip_timestamp');
+  }
+}
+
+/**
  * Removes suspected viewer download groups within an hour of their first hit.
  */
 function entity_metrics_post_update_deduplicate_media_downloads(&$sandbox = []) {

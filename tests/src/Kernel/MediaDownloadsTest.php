@@ -77,7 +77,7 @@ class MediaDownloadsTest extends KernelTestBase {
       finally {
         $this->container->get('request_stack')->pop();
       }
-      $this->assertSame($expected, (int) $database->select('entity_metrics_data')->countQuery()->execute()->fetchField(), (string) $range);
+      $this->assertSame($expected, (int) $database->select('entity_metrics_data')->countQuery()->execute()->fetchField(), $range === NULL ? 'No Range header' : 'Range: ' . $range);
     }
   }
 

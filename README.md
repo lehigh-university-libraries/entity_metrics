@@ -159,7 +159,7 @@ drush pm:uninstall entity_metrics_ratelimiter -y
 ```
 
 When upgrading an existing site, enable the submodule **before** `drush updb` to
-retain rate limiting and its index. Otherwise, update 10003 removes the old index
+retain rate limiting and its index. Otherwise, the post-update removes the old index
 and rate limiting remains off. Fresh main-module installs omit the index.
 
 ## Tests

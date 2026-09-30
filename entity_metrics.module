@@ -52,12 +52,12 @@ function entity_metrics_file_download($uri) {
       return NULL;
     }
 
-    $query = 'SELECT COALESCE(ma.entity_id, md.entity_id, mf.entity_id, mi.entity_id, mv.entity_id) AS mid from file_managed f
-      LEFT JOIN media__field_media_audio_file ma ON field_media_audio_file_target_id = f.fid
-      LEFT JOIN media__field_media_document md ON field_media_document_target_id = f.fid
-      LEFT JOIN media__field_media_file mf ON field_media_file_target_id = f.fid
-      LEFT JOIN media__field_media_image mi ON field_media_image_target_id = f.fid
-      LEFT JOIN media__field_media_video_file mv ON field_media_video_file_target_id = f.fid
+    $query = 'SELECT COALESCE(ma.entity_id, md.entity_id, mf.entity_id, mi.entity_id, mv.entity_id) AS mid from {file_managed} f
+      LEFT JOIN {media__field_media_audio_file} ma ON field_media_audio_file_target_id = f.fid
+      LEFT JOIN {media__field_media_document} md ON field_media_document_target_id = f.fid
+      LEFT JOIN {media__field_media_file} mf ON field_media_file_target_id = f.fid
+      LEFT JOIN {media__field_media_image} mi ON field_media_image_target_id = f.fid
+      LEFT JOIN {media__field_media_video_file} mv ON field_media_video_file_target_id = f.fid
       WHERE uri = :uri';
     $mid = \Drupal::database()->query($query, [
       ':uri' => $uri,
