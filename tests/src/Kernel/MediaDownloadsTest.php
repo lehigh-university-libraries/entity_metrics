@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Drupal\Tests\entity_metrics\Kernel;
 
+use Drupal\Core\Database\Database;
 use Drupal\Core\Session\SessionManagerInterface;
 use Drupal\KernelTests\KernelTestBase;
 use PHPUnit\Framework\Attributes\Group;
@@ -82,7 +83,7 @@ class MediaDownloadsTest extends KernelTestBase {
   }
 
   /**
-   * The post-update preserves grouping boundaries across batches and reruns.
+   * One source read finds all groups, with bounded deletes and safe reruns.
    */
   public function testCleanup(): void {
     $database = $this->container->get('database');
@@ -103,21 +104,16 @@ class MediaDownloadsTest extends KernelTestBase {
     for ($i = 0; $i < 501; $i++) {
       $this->event(['timestamp' => $first + 900]);
     }
-    $sandbox = [];
-    entity_metrics_post_update_deduplicate_media_downloads($sandbox);
-    $this->assertSame(500, $sandbox['processed']);
-    $this->assertLessThan(1, $sandbox['#finished']);
-    // An event inserted during the update is outside its initial snapshot.
-    $new = $this->event(['timestamp' => $first]);
-    do {
-      $message = entity_metrics_post_update_deduplicate_media_downloads($sandbox);
-    } while ($sandbox['#finished'] < 1);
+    Database::startLog('download_cleanup');
+    $message = entity_metrics_post_update_deduplicate_media_downloads();
+    $queries = Database::getLog('download_cleanup');
+    $reads = array_filter($queries, static fn(array $query): bool => str_starts_with($query['query'], 'SELECT') && str_contains($query['query'], 'entity_metrics_data'));
+    $deletes = array_filter($queries, static fn(array $query): bool => str_starts_with($query['query'], 'DELETE') && str_contains($query['query'], 'entity_metrics_data'));
+    $this->assertCount(1, $reads);
+    $this->assertCount(2, $deletes);
     $this->assertSame('Removed 506 suspected viewer download events.', (string) $message);
-    $this->assertEquals([...$retained, $new], $database->select('entity_metrics_data', 'd')->fields('d', ['id'])->orderBy('id')->execute()->fetchCol());
-    $database->delete('entity_metrics_data')->condition('id', $new)->execute();
-    $sandbox = [];
-    $this->assertSame('Removed 0 suspected viewer download events.', (string) entity_metrics_post_update_deduplicate_media_downloads($sandbox));
-    $this->assertSame(1, $sandbox['#finished']);
+    $this->assertEquals($retained, $database->select('entity_metrics_data', 'd')->fields('d', ['id'])->orderBy('id')->execute()->fetchCol());
+    $this->assertSame('Removed 0 suspected viewer download events.', (string) entity_metrics_post_update_deduplicate_media_downloads());
     $this->assertEquals($retained, $database->select('entity_metrics_data', 'd')->fields('d', ['id'])->orderBy('id')->execute()->fetchCol());
     $this->assertTrue($this->container->get('lock')->lockMayBeAvailable('entity_metrics.geolocation'));
   }
@@ -126,30 +122,21 @@ class MediaDownloadsTest extends KernelTestBase {
    * Empty sites complete the update without attempting deletion.
    */
   public function testEmptyCleanup(): void {
-    $sandbox = [];
-    $this->assertSame('Removed 0 suspected viewer download events.', (string) entity_metrics_post_update_deduplicate_media_downloads($sandbox));
-    $this->assertSame(1, $sandbox['#finished']);
+    $this->assertSame('Removed 0 suspected viewer download events.', (string) entity_metrics_post_update_deduplicate_media_downloads());
   }
 
   /**
-   * A later batch's repeat also removes the group's previously kept first hit.
+   * Retains single hits and finds groups past the first 500 rows.
    */
-  public function testViewerGroupAcrossBatches(): void {
+  public function testViewerGroupAfterManySingleHits(): void {
     $database = $this->container->get('database');
     $retained = [];
     for ($media = 1; $media < 500; $media++) {
       $retained[] = $this->event(['entity_id' => $media]);
     }
-    $first = $this->event(['entity_id' => 500]);
-    $second = $this->event(['entity_id' => 500, 'timestamp' => 1100]);
-    $sandbox = [];
-    entity_metrics_post_update_deduplicate_media_downloads($sandbox);
-    $this->assertSame(0, $sandbox['deleted']);
-    $this->assertLessThan(1, $sandbox['#finished']);
-    $this->assertEquals([...$retained, $first, $second], $database->select('entity_metrics_data', 'd')->fields('d', ['id'])->orderBy('id')->execute()->fetchCol());
-    entity_metrics_post_update_deduplicate_media_downloads($sandbox);
-    $this->assertSame(2, $sandbox['deleted']);
-    $this->assertSame(1, $sandbox['#finished']);
+    $this->event(['entity_id' => 500]);
+    $this->event(['entity_id' => 500, 'timestamp' => 1100]);
+    $this->assertSame('Removed 2 suspected viewer download events.', (string) entity_metrics_post_update_deduplicate_media_downloads());
     $this->assertEquals($retained, $database->select('entity_metrics_data', 'd')->fields('d', ['id'])->orderBy('id')->execute()->fetchCol());
   }
 

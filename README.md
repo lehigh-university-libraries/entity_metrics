@@ -116,17 +116,20 @@ Events are grouped by media ID and region ID within 3600 seconds of the first hi
 (lowest ID breaks timestamp ties). Groups with multiple hits are treated as viewer
 traffic and deleted entirely, including the first hit. Single-hit groups remain.
 A 12:45 hit groups through 13:45, across the 13:00 clock-hour boundary. Repeats do
-not extend the window, even after the first hit is deleted. The next event beyond
+not extend the window. The next event beyond
 that window starts a new window. Events without a region ID and node views are
-left alone. The update scans 500 rows per transaction and preserves the current
-window between batches. Events inserted after it starts are excluded.
+left alone. The update reads eligible media rows once, loading only event ID,
+media ID, region ID, and timestamp into memory. It identifies the full deletion
+list in memory, then deletes those IDs in chunks of 500 in one transaction.
+Events inserted after the source read are excluded. Run this through Drush with
+enough PHP memory for those rows and the deletion list.
 
 This is a heuristic: historical events do not store the Range header. Downloads
 by different visitors in the same region within that hour are grouped together
 and will also be deleted if the group has multiple hits.
 Back up before updating and pause cron and analytics refresh jobs during cleanup
-and rebuilding. Run the update after geolocation has assigned regions. Each batch
-shares the geolocation lock. After cleanup, rebuild Lehigh Analytics from the
+and rebuilding. Run the update after geolocation has assigned regions. The cleanup
+holds the geolocation lock. After cleanup, rebuild Lehigh Analytics from the
 remaining raw events before resuming scheduled jobs:
 
 ```sh
